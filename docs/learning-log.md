@@ -201,3 +201,30 @@ To complete this lesson, verify that you can explain:
 | 15 | Performance measurements | Pending |
 | 16 | Documentation and GitHub delivery | Pending |
 
+## Lesson 02 — Building the FastAPI Application Locally
+
+**Date:** 2026-11-05  
+**Status:** In progress
+
+## Engineering Lessons 
+- Isolate Python dependencies with virtual environments. 
+- Separate the API application from the ASGI server. 
+- Understand HTTP methods and status codes. 
+- Test endpoints with curl instead of relying only on the browser. 
+- Design APIs with future compatibility in mind.
+
+### 1. Objectives
+
+- Create a local Python environment.
+- Install FastAPI and Uvicorn.
+- Understand the client-server HTTP request lifecycle.
+- Build and test the first API endpoints.
+- Understand HTTP status codes and API versioning.
+
+### 2. Python Environment
+
+Created and activated a virtual environment:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
