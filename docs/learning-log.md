@@ -227,4 +227,146 @@ Created and activated a virtual environment:
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate
+ACTIVATE .venv  ==>  source .venv/bin/activate
+
+###  Run server
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+
+### 10. Task Creation — POST
+
+Implemented:
+
+`POST /api/v1/tasks`
+
+Technologies:
+- Pydantic BaseModel for request validation.
+- HTTP POST for resource creation.
+- HTTP 201 Created for successful creation.
+- Temporary Python list for in-memory storage.
+
+Example request:
+
+```http
+POST /api/v1/tasks
+Content-Type: application/json
+{
+  "title": "Learn Docker",
+  "description": "Understand Docker fundamentals"
+}
+
+### 12. Complete CRUD Implementation
+
+Implemented the following REST API operations:
+
+| Operation | HTTP Method | Endpoint |
+|-----------|-------------|----------|
+| Create | POST | `/api/v1/tasks` |
+| Read all | GET | `/api/v1/tasks` |
+| Read one | GET | `/api/v1/tasks/{task_id}` |
+| Replace | PUT | `/api/v1/tasks/{task_id}` |
+| Partial update | PATCH | `/api/v1/tasks/{task_id}` |
+| Delete | DELETE | `/api/v1/tasks/{task_id}` |
+
+### 13. Pydantic Validation
+
+Created two Pydantic models:
+
+- `TaskCreate`: validates data required to create a task.
+- `TaskUpdate`: supports partial updates.
+
+Used `model_dump()` to convert Pydantic models into dictionaries.
+
+Used `exclude_unset=True` to update only the fields provided by the client.
+
+### 14. HTTP Status Codes
+
+| Status | Meaning | Usage |
+|--------|---------|-------|
+| 200 | OK | Successful GET, PUT or PATCH |
+| 201 | Created | Successful POST |
+| 204 | No Content | Successful DELETE |
+| 404 | Not Found | Task does not exist |
+| 422 | Unprocessable Content | Invalid request data |
+
+### 15. Current Implementation Limitations
+
+- Tasks are stored in a Python list.
+- Data is lost when the application process restarts.
+- `len(tasks) + 1` is not a reliable unique ID strategy after deletions.
+- The application does not yet use a persistent database.
+
+These limitations will be addressed in subsequent lessons using PostgreSQL.
+
+
+
+## Lesson 03 — Automated Testing with pytest
+
+### Objective
+Implement automated API tests for the FastAPI Task Manager application.
+
+### Tools and dependencies
+- pytest 9.2.0: test framework
+- httpx 0.28.1: HTTP client dependency
+- FastAPI TestClient: simulate HTTP requests without starting Uvicorn
+
+### Concepts learned
+
+1. TestClient:
+   - Sends HTTP requests directly to the FastAPI application.
+   - No separate Uvicorn server is required.
+
+2. Assertions:
+   - assert response.status_code == 200
+   - assert response.json() == expected_data
+
+3. Test isolation:
+   - pytest fixtures prepare and clean the test environment.
+   - monkeypatch temporarily replaces the task ID counter.
+   - Each test starts with an empty task list and an ID counter starting at 1.
+
+4. Parametrized testing:
+   - pytest.mark.parametrize executes one test function with multiple inputs.
+   - Useful for testing validation errors and edge cases.
+
+5. HTTP testing:
+   - 200: successful GET/PUT/PATCH
+   - 201: successful POST
+   - 204: successful DELETE
+   - 404: resource not found
+   - 422: request validation error
+
+### Test coverage
+
+- Health check
+- Task creation
+- Invalid task payloads
+- Retrieve all tasks
+- Retrieve task by ID
+- Update task using PUT
+- Partial update using PATCH
+- Delete task
+- Nonexistent resource handling
+
+### Commands used
+
+Run all tests:
+python -m pytest -v
+
+Show shorter error tracebacks:
+python -m pytest -v --tb=short
+
+### Important engineering lessons
+
+- Tests should be independent.
+- Test both successful and unsuccessful scenarios.
+- Test edge cases, not only normal behavior.
+- Automated tests help detect regressions after code changes.
+- In-memory storage is temporary and unsuitable for persistent production data.
+
+### Result
+
+16 automated test cases passed.
+
+### Next lesson
+PostgreSQL integration and persistent data storage.
+
