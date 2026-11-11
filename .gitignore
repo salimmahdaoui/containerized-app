@@ -1,0 +1,15 @@
+# Environnements virtuels
+venv/
+.venv/
+env/
+
+# Cache Python
+__pycache__/
+*.pyc
+
+# Fichiers de configuration sensibles et variables d'environnement
+.env
+
+# Base de données ou logs locaux
+*.log
+*.sqlite3

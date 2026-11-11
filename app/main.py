@@ -1,6 +1,13 @@
 from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel, field_validator
-from itertools import count
+
+from fastapi import Depends
+from sqlalchemy.orm import Session
+
+from app.DB.database import get_db
+from app.DB.models import Task
+from app.DB.schemas import TaskCreate, TaskResponse
+from sqlalchemy import select
 
 # Create the FastAPI application
 app = FastAPI(
@@ -8,9 +15,6 @@ app = FastAPI(
     version="0.1.0"
 )
 
-# Temporary in-memory storage
-tasks = []
-task_id_counter = count(1)
 
 # Pydantic model: validates incoming task data
 class TaskCreate(BaseModel):
@@ -41,84 +45,147 @@ def second_endpoint():
     "description": "A containerized task management service" 
             }
 
-@app.post("/api/v1/tasks", status_code=201)
-def create_task(task: TaskCreate):
+@app.post(
+    "/api/v1/tasks",
+    response_model=TaskResponse,
+    status_code=201
+)
+def create_task(task: TaskCreate, db: Session = Depends(get_db)):
 
-    new_task = {
-    "id": next(task_id_counter),
-    **task.model_dump()
-    }
+    new_task = Task(
+        title=task.title,
+        description=task.description
+    )
 
-    tasks.append(new_task)
+    try:
+        db.add(new_task)
+        db.commit()
+        db.refresh(new_task)
 
-    return new_task
+        return new_task
+
+    except Exception:
+        db.rollback()
+        raise
 
 # Get all tasks
-@app.get("/api/v1/tasks")
-def get_tasks():
-    return tasks
+@app.get(
+    "/api/v1/tasks",
+    response_model=list[TaskResponse]
+)
+def get_tasks(db: Session = Depends(get_db)):
+
+    statement = select(Task)
+    result = db.scalars(statement).all()
+
+    return result
 
 # Get a task by ID
-@app.get("/api/v1/tasks/{task_id}")
-def get_task(task_id: int):
+@app.get(
+    "/api/v1/tasks/{task_id}",
+    response_model=TaskResponse
+)
+def get_task(task_id: int, db: Session = Depends(get_db)):
 
-    for task in tasks:
-        if task["id"] == task_id:
-            return task
+    statement = select(Task).where(Task.id == task_id)
+    task = db.scalars(statement).first()
 
-    raise HTTPException(
-        status_code=404,
-        detail="Task not found"
-    )
+    if task is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Task not found"
+        )
+
+    return task
+
+
 
 # Delete a task by ID
 @app.delete("/api/v1/tasks/{task_id}", status_code=204)
-def delete_task(task_id: int):
+def delete_task(task_id: int, db: Session = Depends(get_db)):
 
-    for task in tasks:
-        if task["id"] == task_id:
-            tasks.remove(task)
-            return Response(status_code=204)
+    statement = select(Task).where(Task.id == task_id)
+    task = db.scalars(statement).first()
 
-    raise HTTPException(
-        status_code=404,
-        detail="Task not found"
-    )
+    if task is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Task not found"
+        )
 
+    try:
+        db.delete(task)
+        db.commit()
+
+    except Exception:
+        db.rollback()
+        raise
+
+    return Response(status_code=204)
 
 # Replace a task completely
-@app.put("/api/v1/tasks/{task_id}")
-def update_task(task_id: int, updated_task: TaskCreate):
+@app.put(
+    "/api/v1/tasks/{task_id}",
+    response_model=TaskResponse
+)
+def update_task(
+    task_id: int,
+    updated_task: TaskCreate,
+    db: Session = Depends(get_db)
+):
+    statement = select(Task).where(Task.id == task_id)
+    task = db.scalars(statement).first()
 
-    for index, task in enumerate(tasks):
-        if task["id"] == task_id:
+    if task is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Task not found"
+        )
 
-            tasks[index] = {
-                "id": task_id,
-                **updated_task.model_dump()
-            }
+    try:
+        task.title = updated_task.title
+        task.description = updated_task.description
 
-            return tasks[index]
+        db.commit()
+        db.refresh(task)
 
-    raise HTTPException(
-        status_code=404,
-        detail="Task not found"
-    )
+        return task
 
+    except Exception:
+        db.rollback()
+        raise
 # Update selected fields of a task
-@app.patch("/api/v1/tasks/{task_id}")
-def patch_task(task_id: int, updated_fields: TaskUpdate):
+@app.patch(
+    "/api/v1/tasks/{task_id}",
+    response_model=TaskResponse
+)
+def patch_task(
+    task_id: int,
+    updated_fields: TaskUpdate,
+    db: Session = Depends(get_db)
+):
+    statement = select(Task).where(Task.id == task_id)
+    task = db.scalars(statement).first()
 
-    for task in tasks:
-        if task["id"] == task_id:
+    if task is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Task not found"
+        )
 
-            task.update(
-                updated_fields.model_dump(exclude_unset=True)
-            )
+    try:
+        changes = updated_fields.model_dump(exclude_unset=True)
 
-            return task
+        for field, value in changes.items():
+            setattr(task, field, value)
 
-    raise HTTPException(
-        status_code=404,
-        detail="Task not found"
-    )
+        db.commit()
+        db.refresh(task)
+
+        return task
+
+    except Exception:
+        db.rollback()
+        raise
+
+

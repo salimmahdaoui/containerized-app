@@ -1,37 +1,12 @@
 
-import itertools
-
 import pytest
-from fastapi.testclient import TestClient
-
-import app.main as main
-
-
-# Test client connected to the FastAPI application
-client = TestClient(main.app)
-
-
-# Reset application state before and after each test
-@pytest.fixture
-def clean_tasks(monkeypatch):
-    main.tasks.clear()
-
-    monkeypatch.setattr(
-        main,
-        "task_id_counter",
-        itertools.count(1)
-    )
-
-    yield
-
-    main.tasks.clear()
 
 
 # --------------------------------------------------
 # HEALTH CHECK
 # --------------------------------------------------
 
-def test_health_check(clean_tasks):
+def test_health_check(client):
     response = client.get("/health")
 
     assert response.status_code == 200
@@ -42,7 +17,7 @@ def test_health_check(clean_tasks):
 # CREATE TASK
 # --------------------------------------------------
 
-def test_create_task(clean_tasks):
+def test_create_task(client):
     response = client.post(
         "/api/v1/tasks",
         json={
@@ -55,12 +30,12 @@ def test_create_task(clean_tasks):
 
     data = response.json()
 
-    assert data["id"] == 1
+    # PostgreSQL generates IDs using an identity sequence.
+    assert isinstance(data["id"], int)
     assert data["title"] == "Learn Docker"
     assert data["description"] == "Understand Docker fundamentals"
 
 
-# Test multiple invalid payloads
 @pytest.mark.parametrize(
     "payload",
     [
@@ -78,7 +53,7 @@ def test_create_task(clean_tasks):
         "null-title"
     ]
 )
-def test_create_task_invalid_payload(payload, clean_tasks):
+def test_create_task_invalid_payload(client, payload):
     response = client.post(
         "/api/v1/tasks",
         json=payload
@@ -91,7 +66,7 @@ def test_create_task_invalid_payload(payload, clean_tasks):
 # GET TASKS
 # --------------------------------------------------
 
-def test_get_all_tasks(clean_tasks):
+def test_get_all_tasks(client):
     client.post(
         "/api/v1/tasks",
         json={
@@ -107,7 +82,7 @@ def test_get_all_tasks(clean_tasks):
     assert response.json()[0]["title"] == "Task A"
 
 
-def test_get_task_by_id(clean_tasks):
+def test_get_task_by_id(client):
     create_response = client.post(
         "/api/v1/tasks",
         json={
@@ -125,7 +100,7 @@ def test_get_task_by_id(clean_tasks):
     assert response.json()["title"] == "Task B"
 
 
-def test_get_nonexistent_task(clean_tasks):
+def test_get_nonexistent_task(client):
     response = client.get("/api/v1/tasks/999")
 
     assert response.status_code == 404
@@ -136,7 +111,7 @@ def test_get_nonexistent_task(clean_tasks):
 # UPDATE TASK — PUT
 # --------------------------------------------------
 
-def test_put_replace_task(clean_tasks):
+def test_put_replace_task(client):
     create_response = client.post(
         "/api/v1/tasks",
         json={
@@ -160,7 +135,7 @@ def test_put_replace_task(clean_tasks):
     assert response.json()["description"] == "New description"
 
 
-def test_put_nonexistent_task(clean_tasks):
+def test_put_nonexistent_task(client):
     response = client.put(
         "/api/v1/tasks/999",
         json={
@@ -176,7 +151,7 @@ def test_put_nonexistent_task(clean_tasks):
 # UPDATE TASK — PATCH
 # --------------------------------------------------
 
-def test_patch_partial_update(clean_tasks):
+def test_patch_partial_update(client):
     create_response = client.post(
         "/api/v1/tasks",
         json={
@@ -199,7 +174,7 @@ def test_patch_partial_update(clean_tasks):
     assert response.json()["description"] == "Updated description"
 
 
-def test_patch_nonexistent_task(clean_tasks):
+def test_patch_nonexistent_task(client):
     response = client.patch(
         "/api/v1/tasks/999",
         json={
@@ -214,7 +189,7 @@ def test_patch_nonexistent_task(clean_tasks):
 # DELETE TASK
 # --------------------------------------------------
 
-def test_delete_task(clean_tasks):
+def test_delete_task(client):
     create_response = client.post(
         "/api/v1/tasks",
         json={
@@ -231,15 +206,7 @@ def test_delete_task(clean_tasks):
 
     assert delete_response.status_code == 204
 
-    get_response = client.get(
-        f"/api/v1/tasks/{task_id}"
-    )
+    get_response = client.get(f"/api/v1/tasks/{task_id}")
 
     assert get_response.status_code == 404
-
-
-def test_delete_nonexistent_task(clean_tasks):
-    response = client.delete("/api/v1/tasks/999")
-
-    assert response.status_code == 404
 

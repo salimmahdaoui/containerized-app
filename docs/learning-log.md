@@ -370,3 +370,105 @@ python -m pytest -v --tb=short
 ### Next lesson
 PostgreSQL integration and persistent data storage.
 
+
+# Lesson 05.14 — PostgreSQL Integration Testing with Pytest
+
+## 1. Objective
+
+Replace the previous in-memory API tests with integration tests using a dedicated PostgreSQL test database.
+
+The goal is to test the actual FastAPI endpoints while ensuring that test data does not persist between tests.
+
+## 2. Architecture
+
+- FastAPI: application under test.
+- TestClient: sends HTTP requests without starting Uvicorn.
+- Pytest: test framework and fixture management.
+- SQLAlchemy: database sessions and transaction management.
+- PostgreSQL: dedicated test database `task_manager_test_db`.
+
+The development database `task_manager_db` is not used by the test suite.
+
+## 3. Pytest fixtures
+
+### create_test_tables
+
+Creates the ORM tables in the test database once per pytest session using:
+
+`Base.metadata.create_all(bind=test_engine)`
+
+### db_connection
+
+Opens a database connection and an external transaction for each test.
+
+At the end of the test, the external transaction is rolled back.
+
+### db_session
+
+Creates a SQLAlchemy session bound to the test connection.
+
+Uses `join_transaction_mode="create_savepoint"` so that commits inside API routes do not commit the external transaction.
+
+### client
+
+Uses FastAPI `dependency_overrides` to replace the application's `get_db` dependency with the test session.
+
+TestClient sends HTTP requests to the application.
+
+## 4. Transaction isolation
+
+Each test runs inside its own external transaction.
+
+The API routes can execute `commit()` normally. SQLAlchemy uses savepoints, while the outer transaction remains controlled by the fixture.
+
+At the end of the test:
+
+- The SQLAlchemy session is closed.
+- The external transaction is rolled back.
+- The database connection is closed.
+
+This prevents test records from persisting between tests.
+
+Note: PostgreSQL identity sequences are not rolled back like ordinary table data. Tests must not assume that generated IDs always start at 1.
+
+## 5. Tests performed
+
+- Health check.
+- Task creation.
+- Invalid creation payloads.
+- Retrieve all tasks.
+- Retrieve a task by ID.
+- Retrieve a nonexistent task.
+- Complete task replacement using PUT.
+- PUT on nonexistent task.
+- Partial update using PATCH.
+- PATCH on nonexistent task.
+- Task deletion.
+
+Parameterized validation tests cover five invalid payload cases.
+
+Total: 15 test cases.
+
+## 6. Verification
+
+Command:
+
+`python -m pytest -v`
+
+Result:
+
+- 15 passed
+- 0 failed
+- Execution time: 0.54 seconds
+
+A Starlette deprecation warning concerning HTTPX was reported. It did not prevent the tests from passing.
+
+## 7. Key concepts learned
+
+- Pytest fixtures and fixture scopes.
+- FastAPI dependency overrides.
+- SQLAlchemy sessions and external transactions.
+- Savepoints and transaction rollback.
+- Integration testing with PostgreSQL.
+- Isolation between development and test databases.
+
