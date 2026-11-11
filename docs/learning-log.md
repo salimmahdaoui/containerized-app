@@ -297,6 +297,7 @@ Used `exclude_unset=True` to update only the fields provided by the client.
 
 These limitations will be addressed in subsequent lessons using PostgreSQL.
 
+```bash
 
 
 ## Lesson 03 — Automated Testing with pytest
