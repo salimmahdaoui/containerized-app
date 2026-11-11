@@ -472,3 +472,49 @@ A Starlette deprecation warning concerning HTTPX was reported. It did not preven
 - Integration testing with PostgreSQL.
 - Isolation between development and test databases.
 
+
+<!-- # DOCKER -->
+
+
+## Lesson 05.15 — Docker Image Layers and Build Cache
+
+### Objective
+Understand Docker image layers and verify how Docker reuses cached build instructions.
+
+### Concepts learned
+
+- A Docker image is composed of successive filesystem layers.
+- Docker can reuse previously built layers through its build cache.
+- Each Dockerfile instruction can contribute to an image layer.
+- Instruction order matters for build performance.
+
+### Dockerfile optimization principle
+
+Copy dependency files before application source code:
+
+```dockerfile
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY app ./app
+```
+
+This avoids reinstalling Python dependencies when only application source code changes.
+
+### Practical experiment
+
+1. Built the initial image `task-manager-api:v1`.
+2. Rebuilt it without changing files.
+3. Observed that Docker reused cached layers.
+4. Added a comment to `app/main.py`.
+5. Rebuilt the image.
+6. Verified that:
+   - `COPY requirements.txt` remained cached.
+   - `RUN pip install` remained cached.
+   - `COPY app ./app` was rebuilt.
+
+### Key takeaway
+
+Docker reuses unchanged layers and rebuilds affected layers. Proper Dockerfile instruction ordering reduces unnecessary work and improves CI/CD build performance.
+
+

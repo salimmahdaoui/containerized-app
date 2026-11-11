@@ -1,0 +1,30 @@
+# Environment variables and secrets
+.env
+.env.*
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Git
+.git/
+.gitignore
+
+# Documentation and local backups
+docs/
+*.backup
+requirements-full-backup.txt
+
+# IDE
+.vscode/
+.idea/
