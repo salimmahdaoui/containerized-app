@@ -519,3 +519,113 @@ This avoids reinstalling Python dependencies when only application source code c
 Docker reuses unchanged layers and rebuilds affected layers. Proper Dockerfile instruction ordering reduces unnecessary work and improves CI/CD build performance.
 
 
+
+## Lesson 05.16 — Docker Compose, Networking and Persistent Volumes
+
+### Objective
+
+Understand how multiple containers communicate, how service readiness is checked, and how Docker preserves database data beyond container removal.
+
+### Architecture
+
+The application uses two separate services:
+
+- `api`: FastAPI application.
+- `db`: PostgreSQL database.
+
+Docker Compose creates a shared network for these services.
+
+The API connects to PostgreSQL using the service name `db` and internal port `5432`.
+
+### Concepts learned
+
+- Docker Compose creates a network for the application services.
+- Containers can communicate using service names through Docker DNS.
+- A container's lifecycle is independent of the data stored in a named volume.
+- A healthcheck verifies whether a service is ready.
+- `depends_on` with `condition: service_healthy` controls startup ordering based on service health.
+
+### Persistent volume experiment
+
+1. Created a task through the FastAPI API.
+2. Verified that the task was stored in PostgreSQL.
+3. Ran `docker compose down` to remove containers and the Compose network.
+4. Recreated the services using `docker compose up -d`.
+5. Verified that PostgreSQL became healthy.
+6. Retrieved the task again through the API.
+
+The task was still present after the containers were recreated.
+
+### Important distinction
+
+- `docker compose down`: removes containers and the Compose network, but preserves named volumes by default.
+- `docker compose down -v`: also removes Compose-managed named volumes.
+
+The second command can permanently delete the database data stored in those volumes.
+
+### Key takeaway
+
+Containers are replaceable, but persistent data must be stored outside the container's writable filesystem.
+
+Docker Compose networking, healthchecks, service dependencies, and named volumes are essential concepts for running multi-container applications reliably.
+
+
+## Lesson 05.16 — Docker Compose, Networking and Persistent Volumes
+
+### Objective
+
+- Multi-container architecture : l'API FastAPI et PostgreSQL fonctionnent dans deux conteneurs distincts.
+- Docker networking : l'API utilise db comme nom d'hôte pour joindre PostgreSQL sur le port 5432. Docker Compose fournit la résolution DNS entre services.
+- Healthcheck : PostgreSQL utilise pg_isready pour vérifier qu'il est prêt à accepter des connexions.
+- depends_on : condition: service_healthy permet d'attendre que PostgreSQL soit opérationnel avant de démarrer l'API.
+- Named volume : postgres_data conserve les données indépendamment du cycle de vie du conteneur.
+
+Understand how multiple containers communicate, how service readiness is checked, and how Docker preserves database data beyond container removal.
+
+### Architecture
+
+The application uses two separate services:
+
+- `api`: FastAPI application.
+- `db`: PostgreSQL database.
+
+Docker Compose creates a shared network for these services.
+
+The API connects to PostgreSQL using the service name `db` and internal port `5432`.
+
+### Concepts learned
+
+- Docker Compose creates a network for the application services.
+- Containers can communicate using service names through Docker DNS.
+- A container's lifecycle is independent of the data stored in a named volume.
+- A healthcheck verifies whether a service is ready.
+- `depends_on` with `condition: service_healthy` controls startup ordering based on service health.
+
+### Persistent volume experiment
+
+1. Created a task through the FastAPI API.
+2. Verified that the task was stored in PostgreSQL.
+3. Ran `docker compose down` to remove containers and the Compose network.
+4. Recreated the services using `docker compose up -d`.
+5. Verified that PostgreSQL became healthy.
+6. Retrieved the task again through the API.
+
+The task was still present after the containers were recreated.
+
+### Important distinction
+
+- `docker compose down`: removes containers and the Compose network, but preserves named volumes by default.
+- `docker compose down -v`: also removes Compose-managed named volumes.
+
+The second command can permanently delete the database data stored in those volumes.
+
+### Key takeaway
+
+Containers are replaceable, but persistent data must be stored outside the container's writable filesystem.
+
+Docker Compose networking, healthchecks, service dependencies, and named volumes are essential concepts for running multi-container applications reliably.
+
+
+
+
+
