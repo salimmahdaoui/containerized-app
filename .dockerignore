@@ -8,8 +8,11 @@ venv/
 env/
 
 # Python cache
-__pycache__/
-*.py[cod]
+**/__pycache__/
+**/*.py[cod]
+
+# Backup files
+**/*.backup
 
 # Testing
 .pytest_cache/
@@ -28,3 +31,4 @@ requirements-full-backup.txt
 # IDE
 .vscode/
 .idea/
+
