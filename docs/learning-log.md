@@ -626,6 +626,295 @@ Containers are replaceable, but persistent data must be stored outside the conta
 Docker Compose networking, healthchecks, service dependencies, and named volumes are essential concepts for running multi-container applications reliably.
 
 
+---
+
+## Docker Image Optimization and Security
+
+### 1. Understanding Docker Image Layers
+
+A Docker image is composed of multiple read-only layers. Each Dockerfile instruction that changes the image filesystem can create a new layer.
+
+We inspected the image using:
+
+```bash
+docker image inspect task-manager-api:v1
+docker history task-manager-api:v1
+```
+
+We also examined directory sizes inside the container:
+
+```bash
+du -sh /usr/local/lib/python3.12/site-packages/*
+du -h -d 2 /usr/local/lib/python3.12/site-packages/sqlalchemy
+```
+
+**Concepts learned:**
+
+- Docker layers are reused during image builds.
+- Each layer contributes to the image size.
+- `docker history` helps identify which instructions create large layers.
+- `docker image inspect` provides image metadata, including its size.
+- `du` helps identify which directories and packages consume disk space.
+
+**Key takeaway:**
+
+Image optimization starts with measurement. We should identify where the space is being used before modifying the Dockerfile.
+
+### 2. Docker Build Context and `.dockerignore`
+
+We created and improved a `.dockerignore` file to prevent unnecessary files from being sent to the Docker build context.
+
+The file excludes:
+
+- Environment files such as `.env`.
+- Python virtual environments.
+- Python cache files (`__pycache__`, `.pyc`, `.pyo`).
+- Test artifacts and coverage reports.
+- Git metadata.
+- Documentation and local backup files.
+
+**Concepts learned:**
+
+- The build context contains the files Docker can access during a build.
+- `.dockerignore` excludes unnecessary or sensitive files from that context.
+- Excluding `.env` helps prevent accidental inclusion of secrets in the image.
+- Smaller build contexts reduce unnecessary data transfer and help keep builds clean.
+
+**Verification:**
+
+We inspected the files inside the resulting container and confirmed that unnecessary backup files and Python cache files were not copied into the application image.
+
+### 3. Running Containers as a Non-Root User
+
+Initially, the application ran using the default user, which is typically root in the base image.
+
+We created a dedicated system group and user:
+
+```dockerfile
+RUN groupadd --system app \
+    && useradd --system \
+        --gid app \
+        --no-create-home \
+        --shell /usr/sbin/nologin \
+        app
+```
+
+We changed ownership of the application files:
+
+```dockerfile
+COPY --chown=app:app app ./app
+```
+
+We then configured the runtime user:
+
+```dockerfile
+USER app
+```
+
+**Concepts learned:**
+
+- Containers do not need to run as root for most application workloads.
+- The principle of least privilege reduces the impact of a compromised application.
+- `USER` defines the user used by subsequent runtime instructions.
+- `COPY --chown` assigns file ownership during the image build.
+- `--no-create-home` avoids creating an unnecessary home directory.
+- `/usr/sbin/nologin` prevents normal interactive login for the system account.
+
+**Verification:**
+
+We inspected the image configuration:
+
+```bash
+docker image inspect task-manager-api:v1 \
+  --format 'Configured user: {{.Config.User}}'
+```
+
+We also checked the effective user inside a container:
+
+```bash
+docker compose run --rm --no-deps api id
+```
+
+The application ran using the dedicated `app` user instead of root.
+
+### 4. Multi-Stage Docker Builds
+
+We created a separate Dockerfile named `Dockerfile.multistage`.
+
+The objective was to separate dependency installation from the final runtime image.
+
+**Builder stage:**
+
+```dockerfile
+FROM python:3.12-slim AS builder
+
+WORKDIR /install
+
+COPY requirements.txt .
+
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+```
+
+**Runtime stage:**
+
+```dockerfile
+FROM python:3.12-slim
+
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+RUN groupadd --system app \
+    && useradd --system \
+        --gid app \
+        --no-create-home \
+        --shell /usr/sbin/nologin \
+        app
+
+COPY --from=builder /install /usr/local
+
+COPY --chown=app:app app ./app
+
+USER app
+
+EXPOSE 8000
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+Build command:
+
+```bash
+docker build -f Dockerfile.multistage \
+  -t task-manager-api:multistage .
+```
+
+**Concepts learned:**
+
+- Multi-stage builds use multiple `FROM` instructions.
+- The builder stage prepares dependencies.
+- The runtime stage receives only the files copied from the builder and the application source.
+- `COPY --from=builder` transfers selected files between stages.
+- Build-time and runtime responsibilities can be separated.
+
+**Important observation:**
+
+The multi-stage image did not significantly reduce the final image size because both stages used the same Python base image and the runtime still needed all application dependencies.
+
+Multi-stage builds are useful, but they do not automatically guarantee a smaller image.
+
+### 5. Python Dependency Installation Optimization
+
+We investigated the size of Python packages and discovered that Python bytecode compilation contributed to the image size.
+
+We added `--no-compile` to the dependency installation command:
+
+```dockerfile
+RUN pip install \
+    --no-cache-dir \
+    --no-compile \
+    --prefix=/install \
+    -r requirements.txt
+```
+
+**Concepts learned:**
+
+- `--no-cache-dir` prevents pip from retaining its download cache.
+- `--no-compile` prevents pip from compiling installed Python modules into `.pyc` files during installation.
+- `PYTHONDONTWRITEBYTECODE=1` prevents Python from writing bytecode files during normal execution.
+- These two options have different purposes: one concerns pip installation, the other Python runtime behavior.
+
+We created a new image:
+
+```bash
+docker build -f Dockerfile.multistage \
+  -t task-manager-api:optimized-no-compile .
+```
+
+### 6. Image Size Comparison
+
+We compared the three images using:
+
+```bash
+docker image inspect \
+  task-manager-api:v1 \
+  task-manager-api:multistage \
+  task-manager-api:optimized-no-compile \
+  --format '{{.RepoTags}} : {{.Size}} bytes'
+```
+
+Measured results:
+
+| Image | Size |
+|---|---:|
+| `task-manager-api:v1` | 267,619,417 bytes |
+| `task-manager-api:multistage` | 267,607,209 bytes |
+| `task-manager-api:optimized-no-compile` | 243,262,609 bytes |
+
+The optimized image reduced the size by:
+
+- 24,356,808 bytes.
+- Approximately 24.36 MB (decimal).
+- Approximately 9.1% compared with the original image.
+
+**Key takeaway:**
+
+The significant improvement came from disabling bytecode compilation during dependency installation, rather than simply introducing multi-stage builds.
+
+### 7. Image Validation
+
+We verified that the optimized image contained the required Python dependencies:
+
+```bash
+docker run --rm \
+  --entrypoint python \
+  task-manager-api:optimized-no-compile \
+  -c "import fastapi, sqlalchemy, psycopg; print('Dependencies OK')"
+```
+
+We also checked the configured runtime user:
+
+```bash
+docker image inspect task-manager-api:optimized-no-compile \
+  --format 'Configured user: {{.Config.User}}'
+```
+
+The checks confirmed:
+
+- FastAPI, SQLAlchemy and psycopg could be imported.
+- The configured user was `app`.
+
+The optimized image passed these checks. A full end-to-end test against PostgreSQL using this exact image remains a separate validation step.
+
+### 8. Additional Investigation: Removing pip
+
+We investigated whether removing pip from the final image would provide additional savings.
+
+We found that pip was already included in the Python base image.
+
+**Concepts learned:**
+
+- Docker uses a layered filesystem.
+- Deleting a file in a later layer does not necessarily remove the bytes stored in an earlier image layer.
+- Removing inherited files can therefore hide them without recovering the original layer's storage.
+- Building a custom Python runtime to remove inherited tools adds complexity and should be justified by measurable benefits.
+
+**Decision:**
+
+We did not modify the runtime to remove pip because the expected benefit was limited compared with the additional complexity.
+
+### Overall Lessons
+
+- Measure image size before and after each optimization.
+- Use `.dockerignore` to keep the build context clean and exclude secrets.
+- Run application containers as non-root users.
+- Understand that multi-stage builds separate build and runtime environments but do not guarantee smaller images.
+- Optimize Python dependency installation with the appropriate pip options.
+- Validate image functionality after each change.
+- Avoid optimizations that add complexity without a meaningful benefit.
+
+**Next topic:** Container image vulnerability scanning with Trivy.
 
 
 
