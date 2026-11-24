@@ -916,5 +916,204 @@ We did not modify the runtime to remove pip because the expected benefit was lim
 
 **Next topic:** Container image vulnerability scanning with Trivy.
 
+### 8. Runtime Hardening: Removing pip
+
+We investigated the presence of pip in the final runtime image.
+
+Pip was inherited from the official Python base image. Since the application only needs its installed runtime dependencies, pip is not required to start FastAPI.
+
+**Implementation:**
+
+After copying the installed dependencies from the builder stage, we removed pip from the runtime image:
+
+```dockerfile
+COPY --from=builder /install /usr/local
+RUN python -m pip uninstall -y pip
+```
+
+**Verification:**
+
+- `python -m pip --version` confirmed that pip was no longer available.
+- Imports of FastAPI, SQLAlchemy, psycopg and Uvicorn succeeded.
+- The application continued to start correctly.
+
+After removing pip, Trivy no longer reported the six Python findings previously associated with pip metadata.
+
+**Concepts learned:**
+
+- A runtime image should contain what the application needs to run, not necessarily all the tools used during development or installation.
+- Multi-stage builds allow dependencies to be installed in a builder stage and copied into the runtime stage.
+- Removing an unnecessary runtime tool can reduce the attack surface.
+- Changes to the runtime must be followed by application and dependency verification.
+
+### 9. Container Image Security Scanning with Trivy
+
+We installed Trivy and used it to scan the Docker images for known vulnerabilities.
+
+The goal was to understand the image's security posture, identify vulnerable packages and distinguish between vulnerabilities with available fixes and vulnerabilities that could not yet be fixed through the configured package repositories.
+
+#### Initial scan
+
+The first full scan of the optimized image reported:
+
+- Debian OS packages: 240 findings.
+- Python packages: 6 findings, associated with pip.
+- No CRITICAL findings.
+
+The scan showed that most findings came from the Debian base image and its system packages, rather than from the application's Python dependencies.
+
+#### Fixing the zlib vulnerability
+
+A HIGH vulnerability, CVE-2026-85091, was identified in `zlib1g` with an available fix.
+
+We installed the corrected package in the runtime stage:
+
+```dockerfile
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends zlib1g \
+    && rm -rf /var/lib/apt/lists/*
+```
+
+The rebuilt image contained the corrected zlib package version:
+
+`1:1.3.dfsg+really1.3.1-1+deb13u1`
+
+A subsequent Trivy scan confirmed that the zlib finding had disappeared.
+
+#### Updating Debian packages
+
+We investigated the remaining HIGH findings using an APT upgrade simulation:
+
+```bash
+docker run --rm \
+  --user root \
+  --entrypoint sh \
+  task-manager-api:optimized-no-compile \
+  -c 'apt-get update -qq && apt-get -s upgrade'
+```
+
+The simulation identified available updates for packages including:
+
+- `base-files`
+- `libc6` and `libc-bin`
+- `libssl3t64`
+- `openssl`
+- `openssl-provider-legacy`
+
+We integrated `apt-get upgrade -y` into the runtime build and rebuilt the image.
+
+We then verified the installed package versions and compared them with the available APT candidates.
+
+Some remaining vulnerable packages had no newer candidate versions in the configured Debian repositories at the time of the investigation.
+
+#### Understanding unfixed vulnerabilities
+
+After the updates, Trivy still reported HIGH findings for several Debian packages, including:
+
+- util-linux
+- libacl
+- ncurses
+- SQLite
+- systemd
+- perl-base
+
+The remaining findings did not all have an available fix in the configured repositories.
+
+We also ran a filtered scan:
+
+```bash
+trivy image \
+  --scanners vuln \
+  --severity HIGH,CRITICAL \
+  --ignore-unfixed \
+  task-manager-api:optimized-no-compile
+```
+
+This returned zero HIGH or CRITICAL findings with known fixes.
+
+**Important:** This does not mean that the image contains zero vulnerabilities. The `--ignore-unfixed` option excludes vulnerabilities for which Trivy does not identify an available fix. The remaining unfixed findings must still be documented and monitored.
+
+**Concepts learned:**
+
+- A vulnerability scanner identifies known security issues in operating-system and application packages.
+- A HIGH or CRITICAL severity does not automatically mean that a fix is available.
+- `apt-get upgrade` can only install versions available in the configured repositories.
+- `--ignore-unfixed` is useful for prioritizing actionable vulnerabilities, but it must not be interpreted as proof that an image is vulnerability-free.
+- Security scanning is an iterative process: scan, investigate, update, rebuild and scan again.
+
+### 10. Final Validation of the Optimized Image
+
+After hardening the image, we tested the exact optimized image in a separate container without replacing the existing API container or recreating PostgreSQL.
+
+The test container was launched with:
+
+- Image: `task-manager-api:optimized-no-compile`
+- Container: `containerized-app-api-optimized-test`
+- Host port: `8001`
+- Container port: `8000`
+- Docker network: `containerized-app_default`
+- Runtime user: `app`
+
+The test container reused the database environment configuration of the existing API container without displaying database credentials.
+
+**Functional checks:**
+
+- `GET /health` returned HTTP 200 OK.
+- `GET /api/v1/info` returned HTTP 200 OK.
+- `GET /api/v1/tasks` returned HTTP 200 OK and successfully accessed PostgreSQL.
+
+The optimized API and the original API ran simultaneously on separate host ports.
+
+The tests did not require recreating the PostgreSQL container, deleting its volume or modifying existing database records.
+
+This confirmed that the optimized image could start the application and communicate with the existing PostgreSQL service.
+
+### 11. Image Size Analysis
+
+We compared the final image sizes:
+
+| Image | Size |
+|---|---:|
+| `task-manager-api:v1` | 267,619,417 bytes |
+| `task-manager-api:multistage` | 267,607,209 bytes |
+| `task-manager-api:optimized-no-compile` | 280,882,156 bytes |
+
+We also compared the Python dependency directories:
+
+| Image | `site-packages` size |
+|---|---:|
+| Classic image | 75 MB |
+| Optimized image | 50 MB |
+
+This represents a reduction of approximately 33.3% in the space occupied by Python dependencies.
+
+However, the final optimized image was approximately 13.26 MB larger than the classic image.
+
+The investigation showed that the multi-stage build reduced the Python dependency footprint, while the Debian package upgrades and additional runtime packages increased the total image size.
+
+**Conclusion:**
+
+A multi-stage build does not automatically guarantee a smaller final image. Image size must be measured after all runtime security updates and hardening steps have been included.
+
+We decided to prioritize a functional and hardened runtime over removing system packages solely to reduce image size.
+
+### Overall Lessons
+
+- Measure image size before and after each optimization.
+- Use `.dockerignore` to keep the build context clean and exclude secrets.
+- Use multi-stage builds to separate dependency installation from the runtime environment.
+- Run application containers as non-root users.
+- Remove unnecessary runtime tools only when their removal is justified and verified.
+- Understand Docker image layers and why deleting files in later layers does not necessarily recover space from earlier layers.
+- Use Trivy to identify vulnerabilities in both OS packages and application dependencies.
+- Distinguish fixed vulnerabilities from unfixed vulnerabilities.
+- Never interpret a scan using `--ignore-unfixed` as proof that an image is vulnerability-free.
+- Rebuild and rescan after applying security updates.
+- Validate application startup, API endpoints and database connectivity after modifying the runtime image.
+- Preserve existing database volumes and data during container testing.
+- Prefer measurable and justified optimizations over unnecessary complexity.
+
+**Next topic:** Redis integration and caching in the Task Manager application.
 
 
